@@ -210,7 +210,7 @@ def get_arguments():
     barcode_group.add_argument('--pcr_barcodes', action='store_true',
                                help='Only attempts to match the 96 PCR barcodes')
     barcode_group.add_argument('--rapid_barcodes', action='store_true',
-                               help='Only attempts to match the rapid barcodes')
+                               help='Only attempts to match the 12 rapid barcodes')
     barcode_group.add_argument('--limit_barcodes_to', nargs='+', type=int, required=False,
                                help='Specify a list of barcodes to look for (numbers refer to native, PCR or rapid)')
     barcode_group.add_argument('--custom_barcodes',
