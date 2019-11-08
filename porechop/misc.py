@@ -311,6 +311,8 @@ def red(text):
 def yellow(text):
     return YELLOW + text + END_FORMATTING
 
+def bold(text):
+    return BOLD + text + END_FORMATTING
 
 def bold_underline(text):
     return BOLD + UNDERLINE + text + END_FORMATTING

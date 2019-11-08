@@ -24,7 +24,7 @@ import re
 from multiprocessing.dummy import Pool as ThreadPool
 from collections import defaultdict
 
-from .misc import load_fasta_or_fastq, print_table, red, bold_underline, MyHelpFormatter, int_to_str
+from .misc import load_fasta_or_fastq, print_table, red, bold_underline, MyHelpFormatter, int_to_str, bold
 from .adapters import NATIVE_BARCODES, PCR_BARCODES, RAPID_BARCODES, OTHER_ADAPTERS, make_full_native_barcode_adapter, make_full_rapid_barcode_adapter, load_primers, load_custom_barcodes
 from .nanopore_read import NanoporeRead
 from .version import __version__
@@ -151,13 +151,54 @@ def main():
                  args.discard_unassigned, args.barcode_stats_csv)
 
     if (args.native_barcodes or args.pcr_barcodes or args.rapid_barcodes) and args.verbosity > 0:
-        print(bold_underline('\nBarcodes called'), flush=True, file=args.print_dest)
-        barcode_names = []
-        for barcode_name in counts:
-            barcode_names.append(barcode_name)
-        barcode_names.sort()
-        for barcode_name in barcode_names:
-            print(barcode_name + ": " + str(counts[barcode_name]), flush=True, file=args.print_dest)
+        if not args.extended_labels:
+            print(bold_underline('\nBarcodes called'), flush=True, file=args.print_dest)
+            barcode_names = []
+            for barcode_name in counts:
+                barcode_names.append(barcode_name)
+            barcode_names.sort()
+            sum = 0
+            for barcode_name in barcode_names:
+                sum += counts["called"][barcode_name]
+                print(barcode_name + ": " + str(counts["called"][barcode_name]), flush=True, file=args.print_dest)
+            print(bold("total: " + str(sum)), flush=True, file=args.print_dest)
+
+        else:
+            print(bold_underline('\nDouble barcodes called'), flush=True, file=args.print_dest)
+            barcode_names = []
+            sum = 0
+            for barcode_name in counts["double"]:
+                barcode_names.append(barcode_name)
+            barcode_names.sort()
+            for barcode_name in barcode_names:
+                sum += counts["double"][barcode_name]
+                print(barcode_name + ": " + str(counts["double"][barcode_name]), flush=True, file=args.print_dest)
+            print(bold("total doubles: " + str(sum)), flush=True, file=args.print_dest)
+
+            print(bold_underline('\nSingle barcodes called'), flush=True, file=args.print_dest)
+            barcode_names = []
+            for barcode_name in counts["single"]:
+                barcode_names.append(barcode_name)
+            barcode_names.sort()
+            sum = 0
+            for barcode_name in barcode_names:
+                sum += counts["single"][barcode_name]
+                print(barcode_name + ": " + str(counts["single"][barcode_name]), flush=True, file=args.print_dest)
+            print(bold("total singles: " + str(sum)), flush=True, file=args.print_dest)
+
+            print(bold_underline('\nMismatched barcodes called'), flush=True, file=args.print_dest)
+            barcode_names = []
+            for barcode_name in counts["mismatch"]:
+                barcode_names.append(barcode_name)
+            barcode_names.sort()
+            sum = 0
+            for barcode_name in barcode_names:
+                sum += counts["mismatch"][barcode_name]
+                print(barcode_name + ": " + str(counts["mismatch"][barcode_name]), flush=True, file=args.print_dest)
+            print(bold("total mismatched: " + str(sum)), flush=True, file=args.print_dest)
+
+            print(bold_underline('\nMissing both barcodes'), flush=True, file=args.print_dest)
+            print(bold("total missing: " + str(counts["none"]["none"])), flush=True, file=args.print_dest)
 
 def get_arguments():
     """
@@ -725,11 +766,44 @@ def output_reads(reads, out_format, output, read_type, verbosity, discard_middle
         print(bold_underline(verb + trimmed_or_untrimmed + ' reads to ' + destination),
               flush=True, file=print_dest)
 
-    counts = {}
+    counts = {
+        "called": {},
+        "single": {},
+        "double": {},
+        "mismatch": {},
+        "none": {}
+    }
+    
     for read in reads:
-        if not read.barcode_call in counts:
-            counts[read.barcode_call] = 0
-        counts[read.barcode_call] += 1
+
+        start_name, start_id, end_name, end_id, middle_name, middle_id = read.get_barcode_hits()
+        type = "none"
+        barcode_call = "none"
+        if start_id > 80 and end_id > 80:
+            if start_name == end_name:
+                type = "double"
+                barcode_call = start_name
+            else:
+                type = "mismatch"
+                barcode_call = "+".join(sorted([start_name, end_name]))
+        elif start_id > 80:
+            type = "single"
+            barcode_call = start_name
+        elif end_id > 80:
+            type = "single"
+            barcode_call = end_name
+        else:
+            type = "none"
+
+        if not barcode_call in counts[type]:
+            counts[type][barcode_call] = 0
+            
+        counts[type][barcode_call] += 1
+
+        if not read.barcode_call in counts["called"]:
+            counts["called"][read.barcode_call] = 0
+
+        counts["called"][read.barcode_call] += 1
 
     if barcode_stats_csv:
         with open("./barcode_stats.csv","w") as custom_output:

@@ -51,28 +51,37 @@ class NanoporeRead(object):
     def get_name(self, barcode_labels=False, extended_labels=False):
         if barcode_labels:
             if extended_labels:
-                start_name, start_id = self.best_start_barcode
-                end_name, end_id = self.best_end_barcode
+                start_name, start_id, end_name, end_id, middle_name, middle_id = self.get_barcode_hits()
                 bcode_info = " barcode={} start_name={} start_id={} end_name={} end_id={}".format(self.barcode_call, start_name, start_id, end_name, end_id)
-                if self.middle_hit_id != []:
-                    best_middle_hit = sorted(self.middle_hit_id, key = lambda x : float(x[1]), reverse=True)[0] 
-                    return self.name + bcode_info + " middle_name=" + best_middle_hit[0] + " middle_id=" + best_middle_hit[1]
+                if middle_name:
+                    return self.name + bcode_info + " middle_name=" + middle_name + " middle_id=" + middle_id
                 else:
                     return self.name + bcode_info + " middle_name=none middle_id=none"
             else:
                 return self.name + " barcode=" + self.barcode_call
+
         return self.name
+
+    def get_barcode_hits(self):
+        start_name, start_id = self.best_start_barcode
+        end_name, end_id = self.best_end_barcode
+
+        if self.middle_hit_id != []:
+            best_middle_hit = sorted(self.middle_hit_id, key = lambda x : float(x[1]), reverse=True)[0]
+
+            return start_name, start_id, end_name, end_id, best_middle_hit[0], best_middle_hit[1]
+
+        return start_name, start_id, end_name, end_id, None, None
+
 
     def write_to_stats_csv(self,custom_output,barcode_stats_csv=False):
         if barcode_stats_csv:
             name_tokens = (self.name).split(' ')
             name = name_tokens[0]
             start_time = name_tokens[5].lstrip("start_time=")
-            start_name, start_id = self.best_start_barcode
-            end_name, end_id = self.best_end_barcode
-            if self.middle_hit_id != []:
-                middle_name, middle_id = sorted(self.middle_hit_id, key = lambda x : float(x[1]), reverse=True)[0] 
-            else:
+            start_name, start_id, end_name, end_id, middle_name, middle_id = self.get_barcode_hits()
+
+            if not middle_name:
                 middle_name, middle_id = ("none","none")
             custom_output.write("{},{},{},{},{},{},{},{},{}\n".format(name, start_time, self.barcode_call, start_name, start_id, end_name, end_id, middle_name, middle_id))
 
@@ -234,13 +243,13 @@ class NanoporeRead(object):
                                                                     scoring_scheme_vals)
                 if full_score >= middle_threshold:
                     masked_seq = masked_seq[:read_start] + '-' * (read_end - read_start) + \
-                        masked_seq[read_end:]
+                                 masked_seq[read_end:]
                     self.middle_adapter_positions.update(range(read_start, read_end))
 
                     self.middle_hit_str += '  ' + adapter_name + ' (read coords: ' + \
                                            str(read_start) + '-' + str(read_end) + ', ' + \
                                            'identity: ' + '%.1f' % full_score + '%)\n'
-                    self.middle_hit_id.append((adapter_name, full_score))                                                
+                    self.middle_hit_id.append((adapter_name, full_score))
                     trim_start = read_start - extra_middle_trim_good_side
                     if adapter_name in start_sequence_names:
                         trim_start = read_start - extra_middle_trim_bad_side
