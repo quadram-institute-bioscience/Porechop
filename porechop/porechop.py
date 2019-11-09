@@ -62,7 +62,10 @@ def main():
             if args.limit_barcodes_to:
                 print('Limiting barcodes to :', args.limit_barcodes_to)
 
+            print(str(len(barcodes_set)) + " barcodes in search set\n")
+
         barcodes = []
+
         if args.limit_barcodes_to:
             for barcode_number in args.limit_barcodes_to:
                 if (barcode_number < 1 or barcode_number > len(barcodes_set)):
@@ -98,6 +101,7 @@ def main():
             matching_sets = load_custom_barcodes(args.custom_barcodes)
             if args.verbosity > 0:
                 print(bold_underline('Using custom barcodes'), flush=True, file=args.print_dest)
+                print(str(len(matching_sets)) + " barcodes in search set\n")
 
         if not matching_sets:
             if not search_adapters:
@@ -145,12 +149,14 @@ def main():
             print('No adapters found - output reads are unchanged from input reads\n',
                   file=args.print_dest)
 
-    counts = output_reads(reads, args.format, args.output, read_type, args.verbosity,
-                 args.discard_middle, args.min_split_read_size, args.print_dest,
+    output_reads(reads, args.format, args.output, read_type, args.barcode_stats_csv,
+                 args.discard_middle, args.min_split_read_size,
                  args.barcode_dir, args.barcode_labels, args.extended_labels, args.input, args.untrimmed, args.threads,
-                 args.discard_unassigned, args.barcode_stats_csv)
+                 args.discard_unassigned, args.verbosity, args.print_dest)
 
     if (args.native_barcodes or args.pcr_barcodes or args.rapid_barcodes) and args.verbosity > 0:
+        counts = get_stats(reads, args.barcode_threshold)
+
         if not args.extended_labels:
             print(bold_underline('\nBarcodes called'), flush=True, file=args.print_dest)
             barcode_names = []
@@ -164,26 +170,30 @@ def main():
             print(bold("total: " + str(sum)), flush=True, file=args.print_dest)
 
         else:
-            print(bold_underline('\nDouble barcodes called'), flush=True, file=args.print_dest)
+            print(bold_underline('\nDouble barcodes called (count %identity)'), flush=True, file=args.print_dest)
             barcode_names = []
             sum = 0
             for barcode_name in counts["double"]:
                 barcode_names.append(barcode_name)
             barcode_names.sort()
             for barcode_name in barcode_names:
-                sum += counts["double"][barcode_name]
-                print(barcode_name + ": " + str(counts["double"][barcode_name]), flush=True, file=args.print_dest)
+                n = counts["double"][barcode_name]
+                mean_id = counts["double_id"][barcode_name] / n
+                sum += n
+                print(barcode_name + ": {:<5d} {:5.2f}".format(n, mean_id), flush=True, file=args.print_dest)
             print(bold("total doubles: " + str(sum)), flush=True, file=args.print_dest)
 
-            print(bold_underline('\nSingle barcodes called'), flush=True, file=args.print_dest)
+            print(bold_underline('\nSingle barcodes called (count %identity)'), flush=True, file=args.print_dest)
             barcode_names = []
             for barcode_name in counts["single"]:
                 barcode_names.append(barcode_name)
             barcode_names.sort()
             sum = 0
             for barcode_name in barcode_names:
-                sum += counts["single"][barcode_name]
-                print(barcode_name + ": " + str(counts["single"][barcode_name]), flush=True, file=args.print_dest)
+                n = counts["single"][barcode_name]
+                mean_id = counts["single_id"][barcode_name] / n
+                sum += n
+                print(barcode_name + ": {:<5d} {:5.2f}".format(n, mean_id), flush=True, file=args.print_dest)
             print(bold("total singles: " + str(sum)), flush=True, file=args.print_dest)
 
             print(bold_underline('\nMismatched barcodes called'), flush=True, file=args.print_dest)
@@ -414,7 +424,7 @@ def load_reads(input_file_or_directory, verbosity, print_dest, check_read_count)
         sys.exit('Error: could not find ' + input_file_or_directory)
 
     if verbosity > 0:
-        print(int_to_str(len(reads)) + ' reads loaded\n\n',
+        print(int_to_str(len(reads)) + ' reads loaded\n',
               flush=True, file=print_dest)
     return reads, check_reads, read_type
 
@@ -578,8 +588,8 @@ def find_adapters_at_read_ends(reads, matching_sets, verbosity, end_size, extra_
                                threads, check_barcodes, barcode_threshold, barcode_diff,
                                require_two_barcodes, forward_or_reverse_barcodes):
     if verbosity > 0:
-        print(bold_underline('Trimming adapters from read ends'),
-              file=print_dest)
+        print(bold_underline('Trimming adapters from read ends'), file=print_dest)
+
         name_len = max(max(len(x.start_sequence[0]) for x in matching_sets),
                        max(len(x.end_sequence[0]) if x.end_sequence else 0 for x in matching_sets))
         for matching_set in matching_sets:
@@ -588,6 +598,7 @@ def find_adapters_at_read_ends(reads, matching_sets, verbosity, end_size, extra_
             if matching_set.end_sequence:
                 print('  ' + matching_set.end_sequence[0].rjust(name_len) + ': ' +
                       red(matching_set.end_sequence[1]), file=print_dest)
+        print('\nthreads: ' + str(threads), file=print_dest)
         print('', file=print_dest)
 
     read_count = len(reads)
@@ -749,9 +760,63 @@ def display_read_middle_trimming_summary(reads, discard_middle, verbosity, print
           ' based on middle adapters\n\n', file=print_dest)
 
 
-def output_reads(reads, out_format, output, read_type, verbosity, discard_middle,
-                 min_split_size, print_dest, barcode_dir, barcode_labels, extended_labels, input_filename,
-                 untrimmed, threads, discard_unassigned, barcode_stats_csv):
+def get_stats(reads, barcode_threshold):
+
+    counts = {
+        "called": {},
+        "single": {},
+        "single_id": {},
+        "double": {},
+        "double_id": {},
+        "mismatch": {},
+        "none": { "none": 0 }
+    }
+
+    for read in reads:
+
+        start_name, start_id, end_name, end_id, middle_name, middle_id = read.get_barcode_hits()
+        type = "none"
+        barcode_call = "none"
+        barcode_call_id = 0
+        if start_id > barcode_threshold and end_id > barcode_threshold:
+            if start_name == end_name:
+                type = "double"
+                barcode_call = start_name
+                barcode_call_id = start_id
+            else:
+                type = "mismatch"
+                barcode_call = "+".join(sorted([start_name, end_name]))
+        elif start_id > barcode_threshold:
+            type = "single"
+            barcode_call = start_name
+            barcode_call_id = start_id
+        elif end_id > barcode_threshold:
+            type = "single"
+            barcode_call = end_name
+            barcode_call_id = end_id
+        else:
+            type = "none"
+
+        if not barcode_call in counts[type]:
+            counts[type][barcode_call] = 0
+            if type == "single" or type == "double":
+                counts[type + "_id"][barcode_call] = 0
+
+        counts[type][barcode_call] += 1
+        if type == "single" or type == "double":
+            counts[type + "_id"][barcode_call] += barcode_call_id
+
+        if not read.barcode_call in counts["called"]:
+            counts["called"][read.barcode_call] = 0
+
+        counts["called"][read.barcode_call] += 1
+
+    return counts
+
+def output_reads(reads, out_format, output, read_type, barcode_stats_csv, discard_middle,
+             min_split_size, barcode_dir, barcode_labels, extended_labels, input_filename,
+             untrimmed, threads, discard_unassigned, verbosity, print_dest):
+
     if verbosity > 0:
         trimmed_or_untrimmed = 'untrimmed' if untrimmed else 'trimmed'
         if barcode_dir is not None:
@@ -765,45 +830,6 @@ def output_reads(reads, out_format, output, read_type, verbosity, discard_middle
             destination = 'file'
         print(bold_underline(verb + trimmed_or_untrimmed + ' reads to ' + destination),
               flush=True, file=print_dest)
-
-    counts = {
-        "called": {},
-        "single": {},
-        "double": {},
-        "mismatch": {},
-        "none": {}
-    }
-    
-    for read in reads:
-
-        start_name, start_id, end_name, end_id, middle_name, middle_id = read.get_barcode_hits()
-        type = "none"
-        barcode_call = "none"
-        if start_id > 80 and end_id > 80:
-            if start_name == end_name:
-                type = "double"
-                barcode_call = start_name
-            else:
-                type = "mismatch"
-                barcode_call = "+".join(sorted([start_name, end_name]))
-        elif start_id > 80:
-            type = "single"
-            barcode_call = start_name
-        elif end_id > 80:
-            type = "single"
-            barcode_call = end_name
-        else:
-            type = "none"
-
-        if not barcode_call in counts[type]:
-            counts[type][barcode_call] = 0
-            
-        counts[type][barcode_call] += 1
-
-        if not read.barcode_call in counts["called"]:
-            counts["called"][read.barcode_call] = 0
-
-        counts["called"][read.barcode_call] += 1
 
     if barcode_stats_csv:
         with open("./barcode_stats.csv","w") as custom_output:
@@ -932,8 +958,6 @@ def output_reads(reads, out_format, output, read_type, verbosity, discard_middle
 
     if verbosity > 0:
         print('', flush=True, file=print_dest)
-
-    return counts
 
 
 def output_progress_line(completed, total, print_dest, end_newline=False, step=10):
