@@ -442,7 +442,9 @@ def choose_barcoding_kit(adapter_sets, verbosity, print_dest):
     reverse_barcodes = 0
     for adapter_set in adapter_sets:
         score = adapter_set.best_start_or_end_score()
-        if 'Barcode' in adapter_set.name and '(forward)' in adapter_set.name:
+        if 'Native' in adapter_set.name:
+            reverse_barcodes += score
+        elif 'Barcode' in adapter_set.name and '(forward)' in adapter_set.name:
             forward_barcodes += score
         elif 'Barcode' in adapter_set.name and '(reverse)' in adapter_set.name:
             reverse_barcodes += score
