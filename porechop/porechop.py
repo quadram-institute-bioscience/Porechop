@@ -154,7 +154,9 @@ def main():
                  args.barcode_dir, args.barcode_labels, args.extended_labels, args.input, args.untrimmed, args.threads,
                  args.discard_unassigned, args.verbosity, args.print_dest)
 
-    if (args.native_barcodes or args.pcr_barcodes or args.rapid_barcodes) and args.verbosity > 0:
+    if args.verbosity > 0 \
+            and (args.native_barcodes or args.pcr_barcodes or args.rapid_barcodes) \
+            and (args.barcode_labels or args.barcode_stats_csv):
         print_stats(reads, args.barcode_threshold, args.extended_labels, args.print_dest)
 
 
@@ -777,7 +779,7 @@ def print_stats(reads, barcode_threshold, extended, print_dest):
     if not extended:
         print(bold_underline('\nBarcodes called'), flush=True, file=print_dest)
         barcode_names = []
-        for barcode_name in counts:
+        for barcode_name in counts["called"]:
             barcode_names.append(barcode_name)
         barcode_names.sort()
         sum = 0
