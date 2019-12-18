@@ -21,6 +21,7 @@ import subprocess
 import multiprocessing
 import shutil
 import re
+from datetime import datetime
 from multiprocessing.dummy import Pool as ThreadPool
 from collections import defaultdict
 
@@ -32,6 +33,8 @@ from .version import __version__
 
 def main():
     args = get_arguments()
+
+    start_time = datetime.now()
 
     check_read_count = args.check_reads
 
@@ -159,6 +162,10 @@ def main():
             and (args.barcode_labels or args.barcode_stats_csv):
         print_stats(reads, args.barcode_threshold, args.extended_labels, args.print_dest)
 
+    time = datetime.now() - start_time
+
+    if args.verbosity > 0:
+        print("\n\nTime taken: " + str(time.total_seconds()) + " secs")
 
 def get_arguments():
     """
