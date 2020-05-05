@@ -102,6 +102,7 @@ def main():
 
         if args.custom_barcodes:
             matching_sets = load_custom_barcodes(args.custom_barcodes)
+            forward_or_reverse_barcodes = 'forward'
             if args.verbosity > 0:
                 print(bold_underline('Using custom barcodes'), flush=True, file=args.print_dest)
                 print(str(len(matching_sets)) + " barcodes in search set\n")
